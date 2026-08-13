@@ -16,6 +16,18 @@ The public short-context meters used here are $2.50 per million input tokens and
 
 F0 processes up to 500 pages per month. Each request is limited to the first two pages, 4 MB, and one analyze transaction per second. Azure bills Document Intelligence by pages analyzed, not by files or requests. See Microsoft's [billing and service-limit documentation](https://learn.microsoft.com/azure/ai-services/document-intelligence/service-limits?view=doc-intel-4.0.0#billing).
 
+
+## Cost of the schema mapping experiment
+
+The playground mapping experiment sends one one-page fictional invoice to
+`prebuilt-invoice` and one one-page fictional fuel receipt to `prebuilt-receipt`:
+two requests and two pages. On the current F0 resource this is within the 500-page
+monthly allowance (0.4%); at the S0 USD reference rate it is about $0.02. The
+experiment only writes ignored local JSON files under `playground/`; remove those
+files to clean up the local output.
+
+The document-classification pipeline adds one Azure OpenAI call per uploaded document before Document Intelligence is selected. Its prompt contains the source PDF or image and should be treated as a separately metered call when estimating an end-to-end workflow.
+
 ## Cost of one extraction evaluation
 
 The evaluator sends 12 invoices to `prebuilt-invoice` and one fuel receipt to `prebuilt-receipt`: 13 requests and 14 pages.
