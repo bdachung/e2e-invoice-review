@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath":  "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+    "terminal.integrated.env.windows":  {
+                                            "PYTHONPATH":  "${workspaceFolder}/backend"
+                                        },
+    "python.terminal.activateEnvironment":  true
+}

@@ -12,6 +12,11 @@ from pydantic_ai import Agent, BinaryContent, NativeOutput
 from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.providers.azure import AzureProvider
 
+CLASSIFICATION_SYSTEM_PROMPT = (
+    "Classify the supplied financial document for extraction routing. "
+    "Return invoice for a supplier request for payment, and receipt "
+    "for evidence of a completed payment. Do not extract invoice fields."
+)
 
 class DocumentClassification(BaseModel):
     """The extraction route selected for one financial document."""
@@ -30,11 +35,7 @@ class DocumentClassificationPipeline:
         self._agent: Agent[None, DocumentClassification] = Agent(
             model,
             output_type=NativeOutput(DocumentClassification),
-            instructions=(
-                "Classify the supplied financial document for extraction routing. "
-                "Return invoice for a supplier request for payment, and receipt "
-                "for evidence of a completed payment. Do not extract invoice fields."
-            ),
+            instructions=CLASSIFICATION_SYSTEM_PROMPT,
         )
 
     @classmethod

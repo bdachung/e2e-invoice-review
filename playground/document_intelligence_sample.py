@@ -1,20 +1,18 @@
 """Print and save the normalized invoice model for the fictional sample invoice."""
 
 import json
-import sys
-from pathlib import Path
 
+from _bootstrap import PROJECT_ROOT
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RESULT_PATH = PROJECT_ROOT / "playground" / "sample_invoice_result.json"
-load_dotenv(PROJECT_ROOT / "backend" / ".env")
-sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+from app.services.document_intelligence_service import DocumentIntelligenceService
 
-from app.services.document_intelligence_service import DocumentIntelligenceService  # noqa: E402
+
+RESULT_PATH = PROJECT_ROOT / "playground" / "sample_invoice_result.json"
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / "backend" / ".env")
     invoice_path = PROJECT_ROOT / "samples" / "sample_invoice.pdf"
     result = DocumentIntelligenceService.from_environment().analyze_invoice(invoice_path)
     result_json = json.dumps(result.model_dump(mode="json"), indent=2)

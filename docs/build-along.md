@@ -147,3 +147,12 @@ receipt prints `{"document_type": "receipt"}`.
 
 - [ ] Pydantic AI returns validated structured invoice/receipt routing output.
 - [ ] The pipeline accepts local PDF, PNG, and JPEG financial documents.
+
+## Python workspace imports
+
+The root `pyrightconfig.json` and `.vscode/settings.json` declare `backend/` as
+the import root and select its locked virtual environment. Pylance can therefore
+resolve `from app...` in the playground without local `sys.path` changes. Reload
+the VS Code window after pulling these workspace settings; integrated terminals
+also receive `PYTHONPATH=backend` so **Run Python File** works for playground
+scripts.

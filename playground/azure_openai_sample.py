@@ -1,18 +1,13 @@
 """Run a minimal Azure OpenAI Responses API experiment."""
 
-import sys
-from pathlib import Path
-
+from _bootstrap import PROJECT_ROOT
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / "backend" / ".env")
-sys.path.insert(0, str(PROJECT_ROOT / "backend"))
-
-from app.services.azure_openai_service import AzureOpenAIService  # noqa: E402
+from app.services.azure_openai_service import AzureOpenAIService
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / "backend" / ".env")
     service = AzureOpenAIService.from_environment()
     response_text = service.generate_text(
         "What is the capital of France? Answer in one short sentence."

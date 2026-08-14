@@ -1,19 +1,13 @@
 """Run and save rich invoice and receipt extraction mapping experiments."""
 
 import json
-import sys
-from pathlib import Path
-
+from _bootstrap import PROJECT_ROOT
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / "backend" / ".env")
-sys.path.insert(0, str(PROJECT_ROOT / "backend"))
-
-from app.schemas.invoice import invoice_to_manifest_view  # noqa: E402
-from app.schemas.receipt import receipt_to_manifest_view  # noqa: E402
-from app.services.document_intelligence_service import DocumentIntelligenceService  # noqa: E402
+from app.schemas.invoice import invoice_to_manifest_view
+from app.schemas.receipt import receipt_to_manifest_view
+from app.services.document_intelligence_service import DocumentIntelligenceService
 
 EXPERIMENTS = (
     (
@@ -38,6 +32,7 @@ def save_result(output_name: str, result: BaseModel) -> None:
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / "backend" / ".env")
     service = DocumentIntelligenceService.from_environment()
     for output_name, sample_path, method_name, manifest_mapper in EXPERIMENTS:
         analyzer = getattr(service, method_name)

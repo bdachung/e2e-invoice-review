@@ -1,0 +1,6 @@
+{
+  "extraPaths": ["./backend"],
+  "include": ["backend", "playground"],
+  "venvPath": "backend",
+  "venv": ".venv"
+}
