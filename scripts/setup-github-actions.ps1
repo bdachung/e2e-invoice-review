@@ -34,6 +34,12 @@ function Invoke-Gh {
 }
 
 Invoke-Gh -- auth status
+$repositoryMetadata = Invoke-Gh -- api "repos/$Repository" | ConvertFrom-Json
+$repositoryOwner = $repositoryMetadata.owner.login
+$repositoryOwnerId = $repositoryMetadata.owner.id
+$repositoryName = $repositoryMetadata.name
+$repositoryId = $repositoryMetadata.id
+$oidcSubject = "repo:$($repositoryOwner)@$($repositoryOwnerId)/$($repositoryName)@$($repositoryId):environment:$GitHubEnvironment"
 
 $subscriptionId = Invoke-Az -- account show --query id -o tsv
 $tenantId = Invoke-Az -- account show --query tenantId -o tsv
@@ -68,12 +74,18 @@ Ensure-RoleAssignment 'Contributor' $resourceGroupScope
 Ensure-RoleAssignment 'AcrPush' $registryId
 
 $federatedCredentialName = "github-$GitHubEnvironment"
-$existingCredential = Invoke-Az -- ad app federated-credential list --id $appId --query "[?name=='$federatedCredentialName'].name | [0]" -o tsv
+$existingCredentials = @(Invoke-Az -- ad app federated-credential list --id $appId -o json | ConvertFrom-Json)
+$existingCredential = $existingCredentials | Where-Object { $_.name -eq $federatedCredentialName } | Select-Object -First 1
+if ($existingCredential -and $existingCredential.subject -ne $oidcSubject) {
+    Write-Host "Replacing federated credential with the current GitHub OIDC subject."
+    Invoke-Az -- ad app federated-credential delete --id $appId --federated-credential-id $federatedCredentialName
+    $existingCredential = $null
+}
 if (-not $existingCredential) {
     $credential = @{
         name = $federatedCredentialName
         issuer = 'https://token.actions.githubusercontent.com'
-        subject = "repo:${Repository}:environment:${GitHubEnvironment}"
+        subject = $oidcSubject
         audiences = @('api://AzureADTokenExchange')
     } | ConvertTo-Json -Compress
     $credentialPath = Join-Path ([IO.Path]::GetTempPath()) "github-oidc-$([guid]::NewGuid()).json"
