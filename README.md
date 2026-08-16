@@ -15,11 +15,11 @@ This project was built alongside the [Invoice Review tutorial](https://learn.dat
 
 ## AI Workflow
 
-![AI workflow](docs/ai_workflow.png)
+<img src="docs/ai_workflow.png" alt="AI workflow" width="600">
 
 ## System Architecture
 
-![System architecture](docs/system_architecture.jpg)
+<img src="docs/system_architecture.png" alt="System architecture" width="1200">
 
 ## What it does
 
