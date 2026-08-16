@@ -119,7 +119,6 @@ az account set --subscription "Azure subscription 1"
 See [deployment.md](deployment.md) for service purpose, cost drivers, current
 pricing links, password rotation, updates, and targeted cleanup commands.
 
-
 ### Pause and resume
 
 ```powershell
@@ -180,3 +179,80 @@ access without copying AI keys or the shared app password to GitHub.
   workflow is used for future image deployments.
 
 See [github-actions.md](github-actions.md) for the full flow.
+
+## README architecture visuals
+
+### Outcome
+
+The repository README presents two separate visual overviews: the AI workflow
+first, followed by the system architecture.
+
+### Checkpoint
+
+- [ ] The README renders `docs/ai_workflow.png` under **AI Workflow**.
+- [ ] The README renders `docs/system_architecture.jpg` under **System Architecture**.
+
+## Project-facing README
+
+### Outcome
+
+The README presents Invoice Review as a complete project rather than a learner
+starter. It retains the tutorial link as build context while describing the
+application's AI-assisted review workflow, deterministic policy controls, and
+Azure deployment.
+
+### Checkpoint
+
+- [ ] The README has no learner-branch or starter-only instructions.
+- [ ] The tutorial link remains available as a reference.
+
+## README installation and verification
+
+### Outcome
+
+The README's installation section uses the lockfile-enforced backend and
+frontend commands. Its verification section now states what each command
+checks and includes backend compilation in addition to Ruff, TypeScript,
+ESLint, and the production build.
+
+### Checkpoint
+
+- [ ] The README uses `uv sync --locked` and `pnpm install --frozen-lockfile`.
+- [ ] The README verification commands match the project scripts and backend
+  tooling.
+
+## README local startup
+
+### Outcome
+
+The README documents one-command local startup scripts for PowerShell and Bash.
+Each starts the FastAPI backend and Vite frontend together and stops both when
+the user presses `Ctrl+C`.
+
+### Commands
+
+```powershell
+.\scripts\dev.ps1
+```
+
+```bash
+bash ./scripts/dev.sh
+```
+
+### Checkpoint
+
+- [ ] The frontend is available at `http://127.0.0.1:5173`.
+- [ ] The backend is available at `http://127.0.0.1:8000`.
+
+## README library installation
+
+### Outcome
+
+The README explicitly instructs users to install both backend Python libraries
+and frontend JavaScript libraries before starting the application.
+
+### Checkpoint
+
+- [ ] `uv sync --locked` installs backend libraries from `uv.lock`.
+- [ ] `pnpm install --frozen-lockfile` installs frontend libraries from
+  `pnpm-lock.yaml`.
