@@ -1,18 +1,18 @@
 # Build-along guide
 
-The complete guided build lives at <https://learn.datalumina.com/docs/invoice-review>. This local guide records the first checkpoint represented by the `main` branch.
+The complete guided build lives at <https://learn.datalumina.com/docs/invoice-review>.
+This local guide records the working slices implemented in this workspace.
 
-## Starter outcome
+## Starter checkpoint
 
-The repository installs reproducibly, starts a minimal FastAPI service and React interface, and includes the business brief plus fictional source documents.
+### Outcome
 
-## Why this boundary exists
+The repository uses a FastAPI backend, a React frontend, and fictional source
+documents. The application starts locally before any provider request.
 
-The starter removes the completed workflow while preserving every prerequisite needed to build it. You begin with the user, the source documents, and explicit service boundaries instead of reverse-engineering a finished application.
+### Commands
 
-## Commands
-
-```bash
+```powershell
 cd backend
 uv sync --locked
 
@@ -20,139 +20,163 @@ cd ../frontend
 pnpm install --frozen-lockfile
 
 cd ..
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-./scripts/dev.sh --check
-./scripts/dev.sh
+./scripts/dev.ps1 -Check
+./scripts/dev.ps1
 ```
 
-## Important locations
-
-- `docs/client-brief.md`: the recurring finance problem and definition of done
-- `docs/architecture.md`: the intended boundaries and data flow
-- `samples/`: the fictional evaluation corpus and manifest
-- `backend/app/main.py`: the initial API boundary
-- `frontend/src/App.tsx`: the initial interface boundary
-
-## What you should observe
+### What you should observe
 
 - `GET http://localhost:8000/health` returns `{"status":"ok"}`.
-- `http://localhost:5173` shows the Invoice Review starter screen.
-- No Azure request occurs at this checkpoint.
+- `http://localhost:5173` loads Invoice Review.
 
-## Checkpoint
-
-- [ ] Locked backend and frontend installs succeed.
-- [ ] Backend lint passes.
-- [ ] Frontend type-check, lint, and production build pass.
-- [ ] `./scripts/dev.sh --check` reports that Invoice Review is ready to start.
-- [ ] The health endpoint and starter screen load locally.
-
-Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).
-
-## Document Intelligence schema exploration
+## Document Intelligence schemas
 
 ### Outcome
 
-`DocumentIntelligenceService` maps Azure's prebuilt invoice and receipt results
-into Pydantic `InvoiceExtraction` and `ReceiptExtraction` models. Each extracted
-value preserves its typed value, source content, and Azure confidence; the invoice
-and receipt packages also retain provider-specific addresses, items, tax details,
-and payment fields.
+`DocumentIntelligenceService` maps `prebuilt-invoice` and `prebuilt-receipt`
+results into typed Pydantic models. Scalars retain content and confidence, and
+the models retain addresses, taxes, payments, and line items.
 
-### Why
+### Command
 
-Document Intelligence field names and result shapes differ between invoices and
-receipts. Dedicated mapping modules preserve Azure evidence at the extraction
-boundary while `invoice_to_manifest_view` and `receipt_to_manifest_view` expose
-the small normalized view needed by the fictional corpus and later policy layer.
-
-### Commands
-
-```bash
+```powershell
 cd backend
 uv run --locked --no-sync python ../playground/document_intelligence_mapping_experiment.py
 ```
 
-### What you should observe
-
-The command analyzes the fictional invoice and Dutch fuel receipt, prints their
-Pydantic JSON models, and saves them as `playground/sample_invoice_model.json`
-and `playground/sample_receipt_model.json`.
-
-### Checkpoint
-
-- [ ] Azure invoice fields map into the `Invoice` schema.
-- [ ] Azure receipt fields map into the `Receipt` schema.
-- [ ] Both saved playground results serialize as JSON.
-## Azure OpenAI service exploration
+## Maya's review workflow
 
 ### Outcome
 
-`AzureOpenAIService` creates an OpenAI Responses API client from the local Azure
-endpoint, API key, and `AZURE_OPENAI_DEPLOYMENT`. Its `generate_text()` method
-returns the model's aggregated text output without exposing credentials.
+Maya can upload one PDF, PNG, or JPEG up to 4 MB; view the original document,
+prepared fields and line items; make corrections; select an account; and make
+an explicit decision. Review history is local and deletable.
 
-### Why
+### Processing stages
 
-Keeping the deployment selection and client construction in one class creates a
-small, reusable boundary before the later structured document-review adapter is
-introduced.
+1. Document Intelligence layout text, then Chat Completions classification.
+2. `prebuilt-invoice` or `prebuilt-receipt` extraction.
+3. Normalization with confidence, provenance, and line items.
+4. Independent strict Chat Completions extraction.
+5. Deterministic reconciliation: Document Intelligence remains primary and
+   Chat values fill only missing values.
+6. Pure invoice/receipt validation, then a fixed-catalog Chat GL suggestion.
+
+### Policy behavior
+
+- Invoice rules require supplier/customer identity and VAT IDs, document
+  number/date, currency, and total; they validate supplier VAT locally,
+  reconcile totals to EUR 0.01, detect duplicates, and warn for missing PO or
+  low primary confidence.
+- Receipt rules require merchant, transaction date, currency, positive total,
+  and VAT total, without invoice-only customer, PO, or due-date requirements.
+- Errors yield `needs_review`; warnings allow `ready`. Approval requires zero
+  errors and a selected GL code from the local catalog.
+- Saving a changed review field marks only that changed field human-supplied
+  and re-runs the exact same policy.
+
+### Review controls
+
+- The review UI shows source confidence, line items, validation findings, GL
+  selection, and an unsent supplier-correction draft where applicable.
+- Approval is disabled until errors are resolved and a valid GL account is
+  selected. The backend repeats this policy and returns `409 Conflict` for
+  direct invalid requests.
+- Progress streams to a local WebSocket and the browser also polls the
+  persisted result.
+
+## Azure single-container deployment
+
+### Outcome
+
+The Vite frontend is built into the FastAPI image and served from the same
+Container App URL. The deployed demo uses a shared-password session gate,
+PostgreSQL for review data, Azure Files for source-document uploads, and
+exactly one replica. The backend virtual environment is built at its final
+/app/.venv path, so its runtime scripts retain valid Python interpreter paths.
 
 ### Commands
 
-```bash
-cd backend
-uv run --locked --no-sync python ../playground/azure_openai_sample.py
+```powershell
+az login
+az account set --subscription "Azure subscription 1"
+./scripts/deploy-azure.ps1
 ```
 
 ### What you should observe
 
-The configured Azure OpenAI deployment answers the one-sentence prompt. The
-same safe call is available through `python test.py` from `backend`.
+- The script prints one HTTPS Container Apps URL.
+- Each manual deployment uses a unique image tag and creates a new revision.
+- PostgreSQL stores review data across revisions; Azure Files stores uploads
+  only, so SQLite file locks do not affect startup. The deployment script
+  URL-encodes the PostgreSQL password and requires TLS.
+- The browser shows a password screen before any review data.
+- `/health` is available to the platform, while API and WebSocket routes
+  require the signed session cookie.
+- Documents remain available after a deployment revision because data is
+  mounted from Azure Files.
+
+See [deployment.md](deployment.md) for service purpose, cost drivers, current
+pricing links, password rotation, updates, and targeted cleanup commands.
+
+
+### Pause and resume
+
+```powershell
+.\scripts\pause-azure.ps1
+.\scripts\resume-azure.ps1
+```
+
+Pause deactivates the app and stops PostgreSQL without deleting review records
+or uploads. Resume includes inactive revisions when selecting the latest
+provisioned revision. Use `resume-azure.ps1 -DatabaseOnly` before deploying a corrected
+revision when the prior provisioned revision is known to be unhealthy.
+
+## Verification
+
+```powershell
+cd backend
+uv run --locked --no-sync ruff check app
+uv run --locked --no-sync python -m compileall -q app
+
+cd ../frontend
+pnpm exec tsc -b --pretty false
+pnpm lint
+pnpm build
+```
 
 ### Checkpoint
 
-- [ ] The Azure OpenAI deployment is loaded from `AZURE_OPENAI_DEPLOYMENT`.
-- [ ] A Responses API call returns plain text through `AzureOpenAIService`.
-## Azure OpenAI document-classification pipeline
+- [ ] The configured API key can call Azure Chat Completions.
+- [ ] PDF and image samples complete through layout text plus Chat routing.
+- [ ] The review exposes field provenance, comparisons, items, policy findings,
+  GL selection, and an unsent correction draft where applicable.
+- [ ] A human edit revalidates and approval remains policy-gated.
+- [ ] The deployed password gate protects API and WebSocket access.
+- [ ] PostgreSQL retains review history across revisions.
+- [ ] The Azure Files mount retains uploaded source documents across revisions.
+
+## GitHub Actions image deployment
 
 ### Outcome
 
-`DocumentClassificationPipeline` uses Pydantic AI native structured output to
-select either the `invoice` or `receipt` extraction route for a PDF, PNG, or JPEG.
-It constructs an Azure Responses API model from the local endpoint, API key, and
-`AZURE_OPENAI_DEPLOYMENT`; the result is a validated Pydantic model, not parsed
-free-form text.
+GitHub-hosted runners build the Docker image, push it to Azure Container
+Registry, and update the existing Container App. OIDC grants short-lived Azure
+access without copying AI keys or the shared app password to GitHub.
 
-### Why
+### Command
 
-Document Intelligence uses separate prebuilt invoice and receipt models. This
-small routing step determines which extraction model to invoke without adding a
-custom Document Intelligence classifier or training dataset.
-
-### Commands
-
-```bash
-cd backend
-uv run --locked --no-sync python ../playground/document_classification_pipeline.py
+```powershell
+./scripts/setup-github-actions.ps1
 ```
 
 ### What you should observe
 
-The fictional invoice prints `{"document_type": "invoice"}` and the Dutch fuel
-receipt prints `{"document_type": "receipt"}`.
+- The script creates/reuses the Entra deployment identity, scoped Azure roles,
+  federated GitHub credential, and GitHub `production` environment.
+- A push to `main` runs the checked-in workflow and deploys a SHA-tagged
+  image revision.
+- Initial Container App provisioning remains `deploy-azure.ps1`; the GitHub
+  workflow is used for future image deployments.
 
-### Checkpoint
-
-- [ ] Pydantic AI returns validated structured invoice/receipt routing output.
-- [ ] The pipeline accepts local PDF, PNG, and JPEG financial documents.
-
-## Python workspace imports
-
-The root `pyrightconfig.json` and `.vscode/settings.json` declare `backend/` as
-the import root and select its locked virtual environment. Pylance can therefore
-resolve `from app...` in the playground without local `sys.path` changes. Reload
-the VS Code window after pulling these workspace settings; integrated terminals
-also receive `PYTHONPATH=backend` so **Run Python File** works for playground
-scripts.
+See [github-actions.md](github-actions.md) for the full flow.

@@ -1,70 +1,69 @@
-"""Structured invoice-versus-receipt document classification."""
+"""Chat Completions invoice-versus-receipt classification before DI extraction."""
 
 from __future__ import annotations
 
-import mimetypes
-import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
-from pydantic_ai import Agent, BinaryContent, NativeOutput
-from pydantic_ai.models.openai import OpenAIResponsesModel
-from pydantic_ai.providers.azure import AzureProvider
+from pydantic_ai import Agent, NativeOutput
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from app.config import Settings
+from app.providers.azure_openai import build_async_azure_openai_client
 
 CLASSIFICATION_SYSTEM_PROMPT = (
-    "Classify the supplied financial document for extraction routing. "
+    "Classify the supplied financial-document text for extraction routing. "
     "Return invoice for a supplier request for payment, and receipt "
-    "for evidence of a completed payment. Do not extract invoice fields."
+    "for evidence of a completed payment. Do not extract fields."
 )
 
+
 class DocumentClassification(BaseModel):
-    """The extraction route selected for one financial document."""
+    """The prebuilt Document Intelligence route selected for one document."""
 
     document_type: Literal["invoice", "receipt"]
 
 
 class DocumentClassificationPipeline:
-    """Classify a financial document before selecting its extraction model."""
+    """Use OpenAI-compatible Chat Completions with strict Pydantic routing output."""
 
-    def __init__(self, endpoint: str, api_key: str, deployment: str) -> None:
-        model = OpenAIResponsesModel(
-            deployment,
-            provider=AzureProvider(azure_endpoint=endpoint, api_key=api_key),
-        )
+    def __init__(
+        self,
+        provider: OpenAIProvider,
+        deployment: str,
+        text_extractor: Callable[[Path], str],
+    ) -> None:
         self._agent: Agent[None, DocumentClassification] = Agent(
-            model,
+            OpenAIChatModel(deployment, provider=provider),
             output_type=NativeOutput(DocumentClassification),
             instructions=CLASSIFICATION_SYSTEM_PROMPT,
         )
+        self._text_extractor = text_extractor
 
     @classmethod
-    def from_environment(cls) -> DocumentClassificationPipeline:
-        """Create the pipeline from the local Azure OpenAI environment variables."""
-        endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-        deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-        if not endpoint or not api_key or not deployment:
-            message = (
-                "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and "
-                "AZURE_OPENAI_DEPLOYMENT before using this pipeline."
-            )
-            raise RuntimeError(message)
-        return cls(endpoint=endpoint, api_key=api_key, deployment=deployment)
+    def from_settings(
+        cls,
+        settings: Settings,
+        text_extractor: Callable[[Path], str],
+    ) -> DocumentClassificationPipeline:
+        if not settings.azure_openai_deployment:
+            raise RuntimeError("Set AZURE_OPENAI_DEPLOYMENT in backend/.env.")
+        return cls(
+            provider=OpenAIProvider(openai_client=build_async_azure_openai_client(settings)),
+            deployment=settings.azure_openai_deployment,
+            text_extractor=text_extractor,
+        )
 
     def classify(self, document_path: Path) -> DocumentClassification:
-        """Return the structured extraction route for a local PDF or image."""
+        """Classify layout text so PDFs work through Chat Completions too."""
         if not document_path.is_file():
             raise FileNotFoundError(f"Financial document was not found: {document_path}")
-
-        media_type = mimetypes.guess_type(document_path.name)[0]
-        if media_type not in {"application/pdf", "image/jpeg", "image/png"}:
-            raise ValueError("Only PDF, PNG, and JPEG documents can be classified.")
-
-        result = self._agent.run_sync(
-            [
-                "Classify this financial document.",
-                BinaryContent(data=document_path.read_bytes(), media_type=media_type),
-            ]
-        )
-        return result.output
+        document_text = self._text_extractor(document_path).strip()
+        if not document_text:
+            raise ValueError(
+                "Document Intelligence did not return readable text for classification."
+            )
+        return self._agent.run_sync("Classify this financial document:\n\n" + document_text).output

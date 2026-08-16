@@ -1,36 +1,39 @@
-"""Azure OpenAI Responses API surface."""
+"""Small Azure Chat Completions surface used by the playground experiment."""
 
-import os
+from __future__ import annotations
 
-from openai import OpenAI
+from typing import Any
+
+from app.config import Settings, get_settings
+from app.providers.azure_openai import build_azure_openai_client
 
 
 class AzureOpenAIService:
-    """Generate text through an Azure OpenAI deployment."""
+    """Generate plain text through an Azure Chat Completions deployment."""
 
-    def __init__(self, endpoint: str, api_key: str, deployment: str) -> None:
-        self._client = OpenAI(base_url=endpoint, api_key=api_key)
+    def __init__(self, client: Any, deployment: str) -> None:
+        self._client = client
         self._deployment = deployment
 
     @classmethod
-    def from_environment(cls) -> "AzureOpenAIService":
-        """Create the service from local Azure OpenAI environment variables."""
-        endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-        deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-        if not endpoint or not api_key or not deployment:
-            message = (
-                "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and "
-                "AZURE_OPENAI_DEPLOYMENT before using this service."
-            )
-            raise RuntimeError(message)
-        return cls(endpoint=endpoint, api_key=api_key, deployment=deployment)
+    def from_settings(cls, settings: Settings) -> AzureOpenAIService:
+        if not settings.azure_openai_deployment:
+            raise RuntimeError("Set AZURE_OPENAI_DEPLOYMENT in backend/.env.")
+        return cls(build_azure_openai_client(settings), settings.azure_openai_deployment)
+
+    @classmethod
+    def from_environment(cls) -> AzureOpenAIService:
+        """Convenience constructor for the local playground command."""
+        return cls.from_settings(get_settings())
 
     def generate_text(self, prompt: str, *, instructions: str | None = None) -> str:
-        """Generate text from the configured Azure OpenAI deployment."""
-        response = self._client.responses.create(
+        """Generate one text completion with an optional system instruction."""
+        messages: list[dict[str, str]] = []
+        if instructions:
+            messages.append({"role": "system", "content": instructions})
+        messages.append({"role": "user", "content": prompt})
+        response = self._client.chat.completions.create(
             model=self._deployment,
-            input=prompt,
-            instructions=instructions,
+            messages=messages,
         )
-        return response.output_text
+        return response.choices[0].message.content or ""

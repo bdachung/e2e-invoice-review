@@ -9,9 +9,9 @@ class GeneralLedgerClassificationStep:
         self._classifier = classifier
 
     def run(self, state: FinancialDocumentProcessingState) -> FinancialDocumentProcessingState:
-        if state.document is None:
+        if state.review_data is None:
             raise RuntimeError("Normalization must run before general-ledger classification.")
         state.metadata = FinancialDocumentMetadata(
-            gl_suggestion=self._classifier.classify(state.document)
+            gl_suggestion=self._classifier.classify(state.review_data)
         )
         return state

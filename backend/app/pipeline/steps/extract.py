@@ -1,4 +1,4 @@
-"""Document Intelligence extraction step selected by classification."""
+"""Document Intelligence extraction selected by the structured classification."""
 
 from app.pipeline.models import FinancialDocumentProcessingState
 from app.services.document_intelligence_service import DocumentIntelligenceService
@@ -12,7 +12,11 @@ class DocumentIntelligenceExtractionStep:
         if state.classification is None:
             raise RuntimeError("Classification must run before Document Intelligence extraction.")
         if state.classification.document_type == "invoice":
-            state.extraction = self._document_intelligence.analyze_invoice(state.document_path)
+            state.extraction, state.document_text = (
+                self._document_intelligence.analyze_invoice_with_text(state.document_path)
+            )
         else:
-            state.extraction = self._document_intelligence.analyze_receipt(state.document_path)
+            state.extraction, state.document_text = (
+                self._document_intelligence.analyze_receipt_with_text(state.document_path)
+            )
         return state

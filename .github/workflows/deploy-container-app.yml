@@ -1,0 +1,55 @@
+name: Deploy Container App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - backend/**
+      - frontend/**
+      - .github/workflows/deploy-container-app.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: invoice-review-production
+  cancel-in-progress: true
+
+env:
+  RESOURCE_GROUP: rg-invoice-review
+  CONTAINER_APP: invoice-review-web
+  ACR_NAME: invoicereview547ea842
+  IMAGE_NAME: invoice-review-web
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: |
+          image="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${GITHUB_SHA}"
+          az acr login --name "${ACR_NAME}"
+          docker build --tag "$image" .
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Deploy Container Apps revision
+        run: |
+          az containerapp update \
+            --name "${CONTAINER_APP}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --image "${IMAGE}"

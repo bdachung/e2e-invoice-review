@@ -1,0 +1,82 @@
+name: __APP_NAME__
+type: Microsoft.App/containerApps
+location: __LOCATION__
+properties:
+  managedEnvironmentId: "__MANAGED_ENVIRONMENT_ID__"
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: true
+      targetPort: 8000
+      transport: auto
+      allowInsecure: false
+    registries:
+      - server: "__REGISTRY_SERVER__"
+        username: "__REGISTRY_USERNAME__"
+        passwordSecretRef: acr-pull-password
+    secrets:
+      - name: acr-pull-password
+        value: "__ACR_PULL_PASSWORD__"
+      - name: azure-openai-api-key
+        value: "__AZURE_OPENAI_API_KEY__"
+      - name: document-intelligence-key
+        value: "__AZURE_DOCUMENT_INTELLIGENCE_KEY__"
+      - name: app-password
+        value: "__APP_PASSWORD__"
+      - name: session-secret
+        value: "__SESSION_SECRET__"
+      - name: database-url
+        value: "__DATABASE_URL__"
+  template:
+    containers:
+      - name: invoice-review-web
+        image: "__CONTAINER_IMAGE__"
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: AUTH_ENABLED
+            value: "true"
+          - name: APP_PASSWORD
+            secretRef: app-password
+          - name: SESSION_SECRET
+            secretRef: session-secret
+          - name: AZURE_OPENAI_API_KEY
+            secretRef: azure-openai-api-key
+          - name: AZURE_DOCUMENT_INTELLIGENCE_KEY
+            secretRef: document-intelligence-key
+          - name: AZURE_OPENAI_ENDPOINT
+            value: "__AZURE_OPENAI_ENDPOINT__"
+          - name: AZURE_OPENAI_DEPLOYMENT
+            value: "__AZURE_OPENAI_DEPLOYMENT__"
+          - name: AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+            value: "__AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT__"
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: UPLOAD_DIR
+            value: "/mnt/data/uploads"
+          - name: FRONTEND_DIST_DIR
+            value: "/app/frontend-dist"
+        probes:
+          - type: Liveness
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          - type: Readiness
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        volumeMounts:
+          - volumeName: review-data
+            mountPath: /mnt/data
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+    volumes:
+      - name: review-data
+        storageType: AzureFile
+        storageName: reviewdata

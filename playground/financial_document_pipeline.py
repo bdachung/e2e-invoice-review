@@ -7,8 +7,12 @@ from _bootstrap import PROJECT_ROOT
 from dotenv import load_dotenv
 
 from app.pipeline import FinancialDocumentPipeline
+from app.validation.models import CompanyIdentity
 
-NORTHSTAR_VAT_ID = "NL00449544B01"
+NORTHSTAR_IDENTITY = CompanyIdentity(
+    legal_name="Northstar Facilities B.V.",
+    vat_id="NL00449544B01",
+)
 SAMPLES = (
     PROJECT_ROOT / "samples" / "sample_invoice.pdf",
     PROJECT_ROOT / "samples" / "generated" / "13-nl-fuel-receipt.png",
@@ -16,10 +20,18 @@ SAMPLES = (
 OUTPUT_PATH = PROJECT_ROOT / "playground" / "financial_document_pipeline_results.json"
 
 
+def no_duplicate_invoice(_supplier_name: str, _invoice_number: str) -> bool:
+    """Placeholder until the SQLite repository provides duplicate detection."""
+    return False
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     load_dotenv(PROJECT_ROOT / "backend" / ".env")
-    pipeline = FinancialDocumentPipeline.from_environment(NORTHSTAR_VAT_ID)
+    pipeline = FinancialDocumentPipeline.from_environment(
+        NORTHSTAR_IDENTITY,
+        duplicate_check=no_duplicate_invoice,
+    )
     results = []
     for sample_path in SAMPLES:
         logging.info("Processing %s", sample_path.name)
