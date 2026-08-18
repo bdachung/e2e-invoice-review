@@ -21,6 +21,9 @@ class AppConfig:
     upload_dir: Path = Path("./data/uploads")
     max_upload_bytes: int = 4 * 1024 * 1024
     min_field_confidence: float = 0.80
+    # Trusted reviewer identities for human-gated MCP review actions. The MCP
+    # host passes reviewer_id; the server rejects anything outside this list.
+    mcp_reviewer_ids: tuple[str, ...] = ("maya",)
 
 
 APP_CONFIG = AppConfig()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -16,6 +17,9 @@ from sqlalchemy.exc import OperationalError
 from app.accounting.routes import router as accounting_router
 from app.auth import COOKIE_NAME, PUBLIC_API_PATHS, PasswordAuth, unauthorized_response
 from app.auth_routes import router as auth_router
+from app.chat.agent import ChatAgent
+from app.chat.bridge import McpBridge
+from app.chat.routes import router as chat_router
 from app.config import get_app_config, get_settings
 from app.database import build_database
 from app.documents.models import DocumentRecord
@@ -26,13 +30,43 @@ logger = logging.getLogger(__name__)
 SQLITE_SCHEMA_INITIALIZATION_ATTEMPTS = 12
 SQLITE_SCHEMA_RETRY_DELAY_SECONDS = 2
 
+# Additive columns applied to existing databases at startup. create_all() only
+# creates missing tables, so both SQLite and PostgreSQL need an explicit
+# ALTER TABLE for each column added after a database was first created.
+POSTGRES_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("document_review", "JSON"),
+    ("decision_reason", "TEXT"),
+)
+
 
 def _migrate_sqlite(engine: Engine) -> None:
-    """Apply the one additive local-schema change needed by existing demo databases."""
+    """Apply the additive local-schema changes needed by existing demo databases."""
     with engine.begin() as connection:
         columns = {row[1] for row in connection.execute(text("PRAGMA table_info(documents)"))}
-        if "document_review" not in columns:
-            connection.execute(text("ALTER TABLE documents ADD COLUMN document_review JSON"))
+        for column, column_type in POSTGRES_COLUMN_MIGRATIONS:
+            if column not in columns:
+                connection.execute(
+                    text(f"ALTER TABLE documents ADD COLUMN {column} {column_type}")
+                )
+
+
+def _migrate_postgresql(engine: Engine) -> None:
+    """Apply the additive column changes needed by an existing deployed schema."""
+    with engine.begin() as connection:
+        columns = {
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = 'documents'"
+                )
+            )
+        }
+        for column, column_type in POSTGRES_COLUMN_MIGRATIONS:
+            if column not in columns:
+                connection.execute(
+                    text(f'ALTER TABLE documents ADD COLUMN "{column}" {column_type}')
+                )
 
 
 def _initialize_sqlite_schema(engine: Engine) -> None:
@@ -69,6 +103,7 @@ def create_app() -> FastAPI:
         _initialize_sqlite_schema(engine)
     else:
         DocumentRecord.metadata.create_all(engine)
+        _migrate_postgresql(engine)
     password_auth = PasswordAuth(
         enabled=settings.auth_enabled,
         password=settings.app_password,
@@ -77,7 +112,22 @@ def create_app() -> FastAPI:
     )
     password_auth.validate_configuration()
 
-    app = FastAPI(title="Invoice Review API", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        bridge = McpBridge()
+        application.state.mcp_bridge = bridge
+        agent = None
+        if (
+            settings.azure_openai_endpoint
+            and settings.azure_openai_deployment
+            and settings.azure_openai_api_key
+        ):
+            agent = ChatAgent(settings, bridge)
+        application.state.chat_agent = agent
+        yield
+        await bridge.stop()
+
+    app = FastAPI(title="Invoice Review API", version="0.1.0", lifespan=lifespan)
     app.state.config, app.state.session_factory = config, session_factory
     app.state.password_auth = password_auth
     app.add_middleware(
@@ -103,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(document_router)
     app.include_router(progress_router)
     app.include_router(accounting_router)
+    app.include_router(chat_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

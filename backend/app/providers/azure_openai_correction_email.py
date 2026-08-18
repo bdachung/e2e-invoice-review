@@ -27,22 +27,23 @@ class AzureOpenAICorrectionEmailDrafter(CorrectionEmailDrafter):
         self._deployment = deployment
 
     def draft(
-        self, data: FinancialDocumentReviewData, issues: list[ValidationIssue]
+        self,
+        data: FinancialDocumentReviewData,
+        issues: list[ValidationIssue],
+        reason: str | None = None,
     ) -> CorrectionEmailDraft:
+        prompt: dict[str, object] = {
+            "document": data.model_dump(mode="json"),
+            "issues": [issue.model_dump() for issue in issues],
+        }
+        if reason:
+            prompt["reviewer_reason"] = reason
         try:
             response = self._client.beta.chat.completions.parse(
                 model=self._deployment,
                 messages=[
                     {"role": "system", "content": INSTRUCTIONS},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "document": data.model_dump(mode="json"),
-                                "issues": [issue.model_dump() for issue in issues],
-                            }
-                        ),
-                    },
+                    {"role": "user", "content": json.dumps(prompt)},
                 ],
                 response_format=CorrectionEmailDraft,
             )

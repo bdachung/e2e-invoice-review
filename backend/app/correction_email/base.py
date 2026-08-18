@@ -13,5 +13,8 @@ class CorrectionEmailDraftingError(RuntimeError):
 
 class CorrectionEmailDrafter(Protocol):
     def draft(
-        self, data: FinancialDocumentReviewData, issues: list[ValidationIssue]
+        self,
+        data: FinancialDocumentReviewData,
+        issues: list[ValidationIssue],
+        reason: str | None = None,
     ) -> CorrectionEmailDraft: ...

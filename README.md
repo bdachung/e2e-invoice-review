@@ -93,14 +93,16 @@ produce a production frontend build.
 
 ```bash
 cd backend
-uv run --locked --no-sync ruff check app
-uv run --locked --no-sync python -m compileall -q app
+uv run --locked --no-sync ruff check app mcp_server
+uv run --locked --no-sync python -m compileall -q app mcp_server
 
 cd ../frontend
 pnpm exec tsc -b --pretty false
 pnpm lint
 pnpm build
 ```
+
+The same checks run with `.\scripts\dev.ps1 -Check` before the servers start.
 
 See the [client brief](docs/client-brief.md) for the product scenario and
 [deployment instructions](docs/deployment.md) for the Azure environment.

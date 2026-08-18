@@ -12,6 +12,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     status,
@@ -115,6 +116,7 @@ def upload_document(
     background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File()],
     service: Annotated[DocumentService, Depends(get_service)],
+    auto_process: Annotated[bool, Query()] = True,
 ) -> DocumentResponse:
     config: AppConfig = request.app.state.config
     content_type = file.content_type or "application/octet-stream"
@@ -129,9 +131,10 @@ def upload_document(
     record = service.create(
         Path(file.filename or "document").name[:255], content_type, payload, suffix
     )
-    background_tasks.add_task(
-        process_document_in_background, request.app.state.session_factory, config, record.id
-    )
+    if auto_process:
+        background_tasks.add_task(
+            process_document_in_background, request.app.state.session_factory, config, record.id
+        )
     return to_response(record)
 
 

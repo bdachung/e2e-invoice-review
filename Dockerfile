@@ -27,6 +27,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PORT=8000
 COPY --from=backend-build /app/.venv /app/.venv
 COPY --from=backend-build /app/app /app/app
+# The chat bridge spawns the MCP server as a stdio child process
+# (python -m mcp_server.server), so its package must ship in the image.
+COPY --from=backend-build /app/mcp_server /app/mcp_server
 COPY --from=frontend-build /src/frontend/dist /app/frontend-dist
 
 EXPOSE 8000

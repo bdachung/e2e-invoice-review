@@ -104,9 +104,11 @@ class DocumentRepository:
         record.selected_gl_account_code = account_code
         return self._commit(record)
 
-    def set_status(self, record_id: str, status: str) -> DocumentRecord:
+    def set_status(self, record_id: str, status: str, reason: str | None = None) -> DocumentRecord:
         record = self._require(record_id)
         record.status = status
+        if reason is not None:
+            record.decision_reason = reason
         return self._commit(record)
 
     def delete(self, record_id: str) -> None:

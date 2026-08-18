@@ -14,6 +14,7 @@ from app.documents.progress import progress_broker
 from app.documents.repository import DocumentRepository
 from app.documents.schemas import DocumentCorrectionRequest
 from app.pipeline import FinancialDocumentPipeline
+from app.pipeline.chain import PipelineProgressCallback
 from app.pipeline.models import FinancialDocumentReviewData
 from app.providers.azure_openai import build_azure_openai_client
 from app.providers.azure_openai_correction_email import AzureOpenAICorrectionEmailDrafter
@@ -55,10 +56,18 @@ class DocumentService:
         progress_broker.publish(record_id, "started", "upload", "Document uploaded.")
         return record
 
-    def process_existing(self, record_id: str) -> DocumentRecord:
+    def process_existing(
+        self, record_id: str, progress_callback: PipelineProgressCallback | None = None
+    ) -> DocumentRecord:
         record = self.get(record_id)
         path = self._config.upload_dir / Path(record.stored_filename).name
         settings = get_settings()
+
+        def forward(step: str, status: str, message: str | None) -> None:
+            progress_broker.publish(record_id, status, step, message)
+            if progress_callback:
+                progress_callback(step, status, message)
+
         try:
             reviewer = None
             if settings.azure_openai_endpoint and settings.azure_openai_deployment:
@@ -72,9 +81,7 @@ class DocumentService:
                     supplier, number, exclude_id=record_id
                 ),
                 minimum_confidence=self._config.min_field_confidence,
-                progress_callback=lambda step, status, message: progress_broker.publish(
-                    record_id, status, step, message
-                ),
+                progress_callback=forward,
                 document_reviewer=reviewer,
                 content_type=record.content_type,
             )
@@ -136,7 +143,7 @@ class DocumentService:
             raise ValueError(f"Unknown GL account: {account_code}")
         return self._repository.select_gl_account(record_id, account_code)
 
-    def decide(self, record_id: str, decision: str) -> DocumentRecord:
+    def decide(self, record_id: str, decision: str, reason: str | None = None) -> DocumentRecord:
         record = self.get(record_id)
         self._ensure_editable(record)
         if record.status in {"processing", "failed"}:
@@ -147,9 +154,11 @@ class DocumentService:
                 raise DocumentConflictError("Resolve all validation errors before approval.")
             if not report.can_approve(record.selected_gl_account_code):
                 raise DocumentConflictError("Select a valid GL account before approval.")
-        return self._repository.set_status(record_id, decision)
+        return self._repository.set_status(record_id, decision, reason=reason)
 
-    def draft_correction_email(self, record_id: str) -> CorrectionEmailDraft:
+    def draft_correction_email(
+        self, record_id: str, reason: str | None = None
+    ) -> CorrectionEmailDraft:
         record = self.get(record_id)
         if record.status in {"processing", "failed"} or record.review_data is None:
             raise DocumentConflictError("Only a completed review can draft a correction email.")
@@ -164,7 +173,7 @@ class DocumentService:
         drafter = AzureOpenAICorrectionEmailDrafter(
             build_azure_openai_client(settings), settings.azure_openai_deployment
         )
-        return drafter.draft(data, eligible)
+        return drafter.draft(data, eligible, reason=reason)
 
     def delete(self, record_id: str) -> None:
         path = self.file_path(record_id)

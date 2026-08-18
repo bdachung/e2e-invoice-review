@@ -36,6 +36,7 @@ class DocumentRecord(Base):
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     review_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     selected_gl_account_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     issues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

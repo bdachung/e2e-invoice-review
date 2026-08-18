@@ -94,6 +94,16 @@ Container App URL. The deployed demo uses a shared-password session gate,
 PostgreSQL for review data, Azure Files for source-document uploads, and
 exactly one replica. The backend virtual environment is built at its final
 /app/.venv path, so its runtime scripts retain valid Python interpreter paths.
+The image also ships the `mcp_server` package (added to the Dockerfile): the
+chat bridge spawns it as a stdio child process inside the same container, and
+the chat WebSocket is served by the FastAPI app itself.
+
+Schema note: `create_all` only creates missing tables, so additive columns
+(`document_review`, `decision_reason`) are applied at startup with an explicit
+`ALTER TABLE` migration for both SQLite (`PRAGMA table_info`) and PostgreSQL
+(`information_schema.columns`). An existing deployed PostgreSQL therefore
+gains the new column automatically on the next revision — no manual SQL
+needed.
 
 ### Commands
 
@@ -130,6 +140,178 @@ Pause deactivates the app and stops PostgreSQL without deleting review records
 or uploads. Resume includes inactive revisions when selecting the latest
 provisioned revision. Use `resume-azure.ps1 -DatabaseOnly` before deploying a corrected
 revision when the prior provisioned revision is known to be unhealthy.
+
+## Northstar Finance MCP server
+
+### Outcome
+
+The backend now ships a thin MCP server (`backend/mcp_server/`) that exposes
+four business-level tools to an AI chatbot: `process_document`,
+`approve_document`, `reject_document`, and `draft_supplier_email`. The server
+is an adapter layer only — every domain decision still runs in the existing
+finance application (see `docs/mcp-design.md`). Local development uses the
+`stdio` transport; remote deployment uses Streamable HTTP with stateless
+sessions and in-flight progress notifications.
+
+### Why
+
+A chatbot should be able to run the finance review and let Maya approve,
+reject, or request a supplier correction, without reimplementing any policy.
+The MCP layer stays small: `FinanceAdapter` translates application results
+into structured tool results and maps application errors to stable codes
+(`DOCUMENT_NOT_FOUND`, `DOCUMENT_PROCESSING_FAILED`, `INVALID_REVIEW_STATE`,
+`UNKNOWN_REVIEWER`). Approve and Reject are human-gated: the tool descriptions
+say so, and the server rejects any `reviewer_id` outside the trusted list
+(`AppConfig.mcp_reviewer_ids`, default `("maya",)`). Draft Email returns
+editable text; there is no send capability. Every tool call is audit logged
+with request id, tool, document reference, actor, latency, status, and error.
+
+The design document sketches the MCP Python SDK v2 API; this project pins the
+MCP SDK `mcp==1.29.0` (v1, already locked transitively), so the imports were
+adapted to its `FastMCP` API as the design instructs.
+
+### App extensions used by the adapter
+
+- `DocumentRecord.decision_reason` column (additive SQLite migration in
+  `app/main.py`) so a rejection reason is persisted by the app.
+- `DocumentService.process_existing(record_id, progress_callback=None)`
+  forwards pipeline progress to both the WebSocket broker and the MCP caller.
+- `DocumentService.decide(record_id, decision, reason=None)` and
+  `draft_correction_email(record_id, reason=None)` accept the reviewer's
+  reason; the correction-email drafter includes it in the prompt.
+
+### Commands
+
+```powershell
+cd backend
+uv run --locked --no-sync ruff check app mcp_server
+uv run --locked --no-sync python -m compileall -q app mcp_server
+
+# stdio (local MCP clients, Inspector)
+uv run --locked --no-sync python -m mcp_server.server --transport stdio
+
+# Streamable HTTP (stateless, progress-friendly)
+uv run --locked --no-sync python -m mcp_server.server --transport streamable-http --host 127.0.0.1 --port 9000
+```
+
+`document_ref` is the finance application's document id: upload a fictional
+sample through the app first (`POST /api/documents` or the review UI), then
+pass the returned id to `process_document`. Uploads that the app auto-processes
+return their existing review; an unprocessed record is processed live by the
+MCP call, which is when progress notifications stream.
+
+### What you should observe
+
+- An MCP client discovers exactly the four tools with their input schemas.
+- `process_document` streams ordered progress (Classifying → Extracting →
+  Normalizing → Independent review → Validating → GL suggestion → Review
+  complete) and returns a structured `ReviewResult` with a stable `review_id`,
+  fields, validation summary, GL suggestion, conclusion, and allowed actions.
+- Calling `process_document` again returns the same review without reprocessing.
+- Approve requires `reviewer_id` from the trusted list; it fails until a valid
+  GL account is selected, and a decided document cannot be changed.
+- Reject persists the reason; Draft Email returns subject/body with the
+  optional reason and never sends anything.
+- Unknown references return `{"error": "DOCUMENT_NOT_FOUND", ...}`.
+- The server logs one `mcp_tool_call` audit line per call with latency.
+
+### Checkpoint
+
+- [ ] `ruff check app mcp_server` is green.
+- [ ] Tool discovery returns the four business-level tools.
+- [ ] `process_document` streams progress and returns a structured review.
+- [ ] Approve/Reject work only through their explicit tools with a trusted reviewer.
+- [ ] Rejection reason is persisted; Draft Email never sends.
+- [ ] Errors are structured and traceable in the audit log.
+- [ ] The server runs over both stdio and Streamable HTTP.
+
+### Playground scripts
+
+Ready-to-run MCP demos live in `playground/` and run from `backend/`:
+
+```powershell
+cd backend
+uv run --locked --no-sync python ../playground/mcp_tools_list.py      # tool surface, no Azure
+uv run --locked --no-sync python ../playground/mcp_stdio_client.py    # full stdio demo (Azure)
+uv run --locked --no-sync python ../playground/mcp_http_probe.py      # Streamable HTTP probe
+```
+
+`mcp_stdio_client.py` uploads two fictional samples, streams `process_document`
+progress, approves after a host GL selection, rejects with a reason, and drafts
+an unsent supplier email. `mcp_http_probe.py` starts the server itself and can
+process a real document over HTTP with `--document-ref <id>`. Both document
+their expected Azure calls in their headers; created records persist in the
+local SQLite database for the review UI and can be removed with the
+`_mcp_demo.delete_record` helper. If `mcp_http_probe.py` fails with
+`426 Upgrade Required`, a stale process already holds the chosen port — use
+`--port NNNN` or stop it (`netstat -ano | findstr :9010`, then
+`taskkill /PID <pid> /F`).
+
+## Chat box over the MCP server
+
+### Outcome
+
+The review UI now has a floating chat icon (bottom-right) that toggles a chat
+panel on and off. The chat connects to the **Northstar Finance MCP server via
+stdio, hosted by the FastAPI app**: the app spawns
+`python -m mcp_server.server --transport stdio` as a persistent child process
+(`app/chat/bridge.py`) and drives it with a pydantic-ai agent
+(`app/chat/agent.py`) whose only tools are the four MCP tools. Browser, agent,
+and human actions all flow through one WebSocket (`/api/chat/stream`), and the
+MCP `process_document` progress notifications stream into the chat.
+
+### Why stdio instead of browser-to-HTTP
+
+The browser cannot speak stdio, so the FastAPI app acts as the MCP client
+(stdio) and the browser only talks to the app: one port, existing password
+gate, no new frontend dependency, no CORS, and the MCP child process isolates
+the blocking Azure work from the FastAPI event loop. Streamable HTTP remains
+for external MCP clients (Inspector, Claude Desktop).
+
+### Human control
+
+The agent prompt forbids autonomous approval/rejection. When `process_document`
+returns, the backend emits a `review` event and the panel renders **Approve /
+Reject / Draft email chips**. Clicking a chip sends an `action` message that
+the route executes directly through the bridge with the trusted reviewer id
+(`AppConfig.mcp_reviewer_ids`), never through the LLM; the finance app's own
+state checks still apply (e.g. approval requires a clean report and a selected
+GL account).
+
+### Commands
+
+```powershell
+cd backend
+uv run --locked --no-sync ruff check app mcp_server
+uv run --locked --no-sync uvicorn app.main:app
+```
+
+Open http://127.0.0.1:8000, click the chat icon, and either upload an invoice
+or receipt directly in the chat (paperclip button) or ask the assistant to
+review the current document. Chat uploads use `auto_process=false` so the
+agent's `process_document` call runs the pipeline live with progress. Backend
+verification: `pyright backend/app/chat backend/mcp_server` reports zero
+errors; frontend `tsc -b`, `eslint`, and `vite build` stay green.
+
+### What you should observe
+
+- The chat icon toggles the panel; the header shows "Connected to MCP server"
+  and lists the four discovered tools.
+- Asking for a review streams the six-stage progress into the chat, then the
+  structured review event renders the action chips and the assistant summarizes.
+- Approve/Reject/Draft email run as explicit actions; policy errors (e.g.
+  "Resolve all validation errors before approval") come back as structured
+  `action_result` events.
+- Closing the panel cancels the in-flight turn; chat history is ephemeral.
+
+### Checkpoint
+
+- [ ] The chat icon toggles the panel on/off in every view.
+- [ ] The chat connects to the MCP server over stdio hosted by FastAPI.
+- [ ] `process_document` progress and results stream into the chat.
+- [ ] Approve/Reject/Draft email are human-click chips, never LLM-driven.
+- [ ] Azure OpenAI chat replies and tool calls consume configured capacity;
+      without OpenAI settings the chat reports a clear configuration error.
 
 ## Verification
 
@@ -227,7 +409,12 @@ ESLint, and the production build.
 
 The README documents one-command local startup scripts for PowerShell and Bash.
 Each starts the FastAPI backend and Vite frontend together and stops both when
-the user presses `Ctrl+C`.
+the user presses `Ctrl+C`. `dev.ps1 -Check` and `dev.sh -Check` run the
+documented verification suite (backend Ruff + compile, frontend tsc + eslint +
+build) and then exit; without the flag they start the servers. Both scripts
+pre-check the ports and launch the frontend with pnpm when it is on PATH,
+otherwise the already-installed Vite binary via Node, and finally Corepack, so
+they run without a global pnpm installation.
 
 ### Commands
 

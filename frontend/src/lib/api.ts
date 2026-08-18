@@ -141,10 +141,43 @@ export function subscribeDocumentProgress(
   return () => socket.close()
 }
 
-export function uploadDocument(file: File) {
+export type ChatAction = 'approve' | 'reject' | 'draft_email'
+
+export type ChatEvent =
+  | { type: 'ready'; tools: string[] }
+  | { type: 'user'; text: string }
+  | { type: 'text'; delta: string }
+  | { type: 'tool'; name: string; arguments: Record<string, unknown> }
+  | { type: 'tool_result'; name: string; content: unknown }
+  | { type: 'progress'; progress: number; total: number | null; message: string | null }
+  | { type: 'review'; review_id: string; status: string; document_ref: string | null; conclusion: string | null; allowed_actions: ChatAction[] }
+  | { type: 'action_result'; action: ChatAction; result: Record<string, unknown> }
+  | { type: 'error'; message: string }
+  | { type: 'done' }
+
+export interface ChatStream {
+  send: (payload: Record<string, unknown>) => void
+  close: () => void
+}
+
+export function connectChatStream(onEvent: (event: ChatEvent) => void): ChatStream {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const baseUrl = apiBaseUrl
+    ? apiBaseUrl.replace(/^http/, 'ws')
+    : `${protocol}//${window.location.host}`
+  const socket = new WebSocket(`${baseUrl}/api/chat/stream`)
+  socket.addEventListener('message', ({ data }) => onEvent(JSON.parse(data) as ChatEvent))
+  return {
+    send: (payload) => socket.send(JSON.stringify(payload)),
+    close: () => socket.close(),
+  }
+}
+
+export function uploadDocument(file: File, options: { autoProcess?: boolean } = {}) {
   const body = new FormData()
   body.append('file', file)
-  return request<Document>('/api/documents', { method: 'POST', body })
+  const query = options.autoProcess === false ? '?auto_process=false' : ''
+  return request<Document>(`/api/documents${query}`, { method: 'POST', body })
 }
 
 export const getSession = () => request<Session>('/api/auth/session')
