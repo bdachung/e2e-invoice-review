@@ -524,3 +524,81 @@ stays `TLS1_0` on purpose to match the current resource.
 - [ ] `terraform plan -detailed-exitcode` returns 0 with an empty diff.
 - [ ] No `*.tfstate`, `.env`, or secret values are committed.
 - [ ] The app `/health` endpoint and the full review flow still work unchanged.
+
+## Terraform migration - Phase 2: Key Vault secrets
+
+### Outcome
+
+The Container App now reads its six runtime secrets as native Azure Key Vault
+references resolved by the app's system-assigned identity. Secret values live
+only in Key Vault: they never appear in Terraform configuration, state, the
+repository, or this guide. The vault uses RBAC authorization with soft delete
+and purge protection. The PostgreSQL administrator password is stored in the
+vault for safekeeping but remains managed out-of-band (the app's
+`database-url` secret carries it), so Terraform still cannot rotate it.
+
+### Why
+
+Phase 1 kept secrets out-of-band so the import cycle could reach a no-change
+plan. Phase 2 moves the source of truth to Key Vault: rotation and auditing
+become centralized, the container app stores only secret IDs instead of values,
+and future Terraform applies never re-expose the values.
+
+### Commands
+
+Run the Azure-authenticated commands yourself in your own terminal:
+
+```powershell
+cd infra/terraform
+
+# 1. Review and create only the Key Vault (migration staging target)
+terraform plan -target=azurerm_key_vault.this
+terraform apply -target=azurerm_key_vault.this
+
+# 2. Seed the seven secrets (prompts, no echo, no files)
+cd ..
+.\scripts\seed-keyvault.ps1
+
+# 3. Add the app identity, Key Vault role assignment, and secret references
+cd infra/terraform
+terraform apply
+
+# 4. Confirm the migration is stable
+terraform plan -detailed-exitcode
+```
+
+The seed script prompts for: `acr-pull-password`, `app-password`,
+`session-secret`, `azure-openai-api-key`, `document-intelligence-key`,
+`database-url`, and `postgres-admin-password`. You can use the portal instead:
+Key Vault > Secrets > Generate/Import.
+
+### What you should observe
+
+- The first apply creates only the vault with RBAC, soft delete, and purge
+  protection.
+- The seed script writes each secret without echoing it.
+- The second apply adds a SystemAssigned identity, grants it
+  `Key Vault Secrets User` on the vault, and switches the app's six secrets to
+  Key Vault references (a new revision is created).
+- `terraform plan` afterwards reports no changes.
+- The app stays reachable: `/health`, the password gate, and a fictional
+  document all still work after the revision switch.
+- State contains only secret IDs and the write-only key reference, never values.
+
+### Rotation
+
+To rotate a value, update the matching Key Vault secret, then deploy a new
+revision (the CI image workflow does this). A running revision keeps the secret
+version it resolved at creation; the next revision picks up the new version.
+Rotate `app-password`, `session-secret`, the AI keys, and the PostgreSQL
+password (including the `database-url` secret) after this migration because the
+original values existed in the Phase 1 export files.
+
+### Checkpoint
+
+- [ ] Key Vault exists with RBAC, soft delete, and purge protection.
+- [ ] All seven secrets are seeded.
+- [ ] The app identity has `Key Vault Secrets User` on the vault.
+- [ ] The Container App uses Key Vault references and the plan shows no changes.
+- [ ] The app is functional after the revision switch.
+- [ ] No secret value appears in the repository, state, or this guide.

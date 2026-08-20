@@ -45,3 +45,9 @@ variable "frontend_dist_dir" {
   type        = string
   default     = "/app/frontend-dist"
 }
+
+
+variable "key_vault_secrets_officer_object_id" {
+  description = "Object ID of the user allowed to write secrets into Key Vault (az ad signed-in-user show --query id -o tsv). Not a secret value."
+  type        = string
+}

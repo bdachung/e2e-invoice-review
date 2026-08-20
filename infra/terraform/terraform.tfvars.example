@@ -13,3 +13,8 @@ azure_document_intelligence_endpoint = "https://di-invoice-review-77ee6.cognitiv
 
 upload_dir        = "/mnt/data/uploads"
 frontend_dist_dir = "/app/frontend-dist"
+
+
+# Object ID of the person who seeds/rotates Key Vault secrets:
+#   az ad signed-in-user show --query id -o tsv
+key_vault_secrets_officer_object_id = "<your-user-object-id>"

@@ -5,6 +5,9 @@ resource "azurerm_container_app" "web" {
   revision_mode                = "Single"
   workload_profile_name        = "Consumption"
   max_inactive_revisions       = 100
+  identity {
+    type = "SystemAssigned"
+  }
 
   ingress {
     external_enabled = true
@@ -20,6 +23,36 @@ resource "azurerm_container_app" "web" {
     server               = azurerm_container_registry.this.login_server
     username             = azurerm_container_registry.this.name
     password_secret_name = "acr-pull-password"
+  }
+  secret {
+    name                = "acr-pull-password"
+    key_vault_secret_id = "${azurerm_key_vault.this.vault_uri}secrets/acr-pull-password"
+    identity            = "System"
+  }
+  secret {
+    name                = "app-password"
+    key_vault_secret_id = "${azurerm_key_vault.this.vault_uri}secrets/app-password"
+    identity            = "System"
+  }
+  secret {
+    name                = "session-secret"
+    key_vault_secret_id = "${azurerm_key_vault.this.vault_uri}secrets/session-secret"
+    identity            = "System"
+  }
+  secret {
+    name                = "azure-openai-api-key"
+    key_vault_secret_id = "${azurerm_key_vault.this.vault_uri}secrets/azure-openai-api-key"
+    identity            = "System"
+  }
+  secret {
+    name                = "document-intelligence-key"
+    key_vault_secret_id = "${azurerm_key_vault.this.vault_uri}secrets/document-intelligence-key"
+    identity            = "System"
+  }
+  secret {
+    name                = "database-url"
+    key_vault_secret_id = "${azurerm_key_vault.this.vault_uri}secrets/database-url"
+    identity            = "System"
   }
 
   template {
@@ -78,19 +111,24 @@ resource "azurerm_container_app" "web" {
       }
 
       liveness_probe {
-        transport        = "HTTP"
-        port             = 8000
-        path             = "/health"
-        initial_delay    = 10
-        interval_seconds = 30
+        transport               = "HTTP"
+        port                    = 8000
+        path                    = "/health"
+        initial_delay           = 10
+        interval_seconds        = 30
+        timeout                 = 1
+        failure_count_threshold = 3
       }
 
       readiness_probe {
-        transport        = "HTTP"
-        port             = 8000
-        path             = "/health"
-        initial_delay    = 5
-        interval_seconds = 10
+        transport               = "HTTP"
+        port                    = 8000
+        path                    = "/health"
+        initial_delay           = 5
+        interval_seconds        = 10
+        timeout                 = 1
+        failure_count_threshold = 3
+        success_count_threshold = 3
       }
 
       volume_mounts {
@@ -106,16 +144,14 @@ resource "azurerm_container_app" "web" {
     }
   }
 
-  # The CI workflow (az containerapp update --image) owns the image tag,
-  # scripts/deploy-azure.ps1 owns the secret values, and the platform stores
-  # probe thresholds as 0/empty values that the provider cannot express in
-  # config (ranges start at 1). Terraform never reverts any of them.
+  # The CI workflow (az containerapp update --image) owns the image tag;
+  # Terraform never reverts it. Probes carry explicit valid values so app
+  # updates do not replay the platform's stored 0 defaults. Secrets are
+  # managed by Terraform as Key Vault references (values live in Key Vault);
+  # the app's system-assigned identity reads them via Key Vault Secrets User.
   lifecycle {
     ignore_changes = [
       template[0].container[0].image,
-      template[0].container[0].liveness_probe,
-      template[0].container[0].readiness_probe,
-      secret,
     ]
   }
 }
