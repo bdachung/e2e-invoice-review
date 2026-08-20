@@ -11,3 +11,12 @@ samples/sample-invoice.pdf
 frontend/node_modules/
 frontend/dist/
 playground/*.json
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+crash.log
+override.tf
+override.tf.json

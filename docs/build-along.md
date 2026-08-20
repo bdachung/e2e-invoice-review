@@ -443,3 +443,84 @@ and frontend JavaScript libraries before starting the application.
 - [ ] `uv sync --locked` installs backend libraries from `uv.lock`.
 - [ ] `pnpm install --frozen-lockfile` installs frontend libraries from
   `pnpm-lock.yaml`.
+
+
+## Terraform migration - Phase 1 configuration
+
+### Outcome
+
+The existing Azure Container Apps deployment now has a clean single-root-module
+Terraform configuration in `infra/terraform/` that can import all 11 managed
+resources (the ten `aztfexport` resources plus the resource group) and reach a
+no-change plan. Secrets stay out of Terraform: the Container App keeps its
+existing secret values, `lifecycle.ignore_changes` protects the `secret` blocks
+and the CI-managed image, and no secret value appears in the repository, in
+state, or in this guide. Azure AI resources remain external; only their
+non-secret endpoints are referenced as variables.
+
+### Why
+
+The deployment was previously created entirely by `scripts/deploy-azure.ps1`
+and the portal. Terraform now becomes the source of truth for the infrastructure
+topology while the GitHub Actions image release and the out-of-band secret
+provisioning continue unchanged.
+
+### Commands
+
+Run the Azure-authenticated commands yourself in your own terminal so no secret
+or credential flows through the assistant:
+
+```powershell
+# 1. Bootstrap remote state (creates rg-invoice-review-tfstate,
+#    stinvoicereviewtfstate, and the tfstate container)
+.\scripts\bootstrap-remote-state.ps1
+
+# 2. Initialize with the pinned provider (azurerm 4.80.0) and remote backend
+cd infra/terraform
+terraform init
+
+# 3. Import the 11 existing resources
+terraform import azurerm_resource_group.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review
+terraform import azurerm_log_analytics_workspace.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.OperationalInsights/workspaces/law-invoice-review
+terraform import azurerm_container_app_environment.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.App/managedEnvironments/cae-invoice-review
+terraform import azurerm_container_registry.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.ContainerRegistry/registries/invoicereview547ea842
+terraform import azurerm_storage_account.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.Storage/storageAccounts/stinvoicereview547ea842
+terraform import azurerm_storage_share.reviewdata /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.Storage/storageAccounts/stinvoicereview547ea842/fileServices/default/shares/reviewdata
+terraform import azurerm_container_app_environment_storage.reviewdata /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.App/managedEnvironments/cae-invoice-review/storages/reviewdata
+terraform import azurerm_postgresql_flexible_server.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-invoice-547ea842
+terraform import azurerm_postgresql_flexible_server_database.this /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-invoice-547ea842/databases/invoicereview
+terraform import azurerm_postgresql_flexible_server_firewall_rule.allow_azure_services /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-invoice-547ea842/firewallRules/AllowAllAzureServicesAndResourcesWithinAzureIps_2026-8-14_22-31-16
+terraform import azurerm_container_app.web /subscriptions/547ea842-2fe2-41f8-95a4-80bd9f69961b/resourceGroups/rg-invoice-review/providers/Microsoft.App/containerApps/invoice-review-web
+
+# 4. Verify the migration: expect "No changes" and exit code 0
+terraform plan -detailed-exitcode
+```
+
+If `terraform plan` reports differences, adjust the configuration to match the
+existing Azure state (never change Azure), then re-run the plan until it is
+empty. Known reconciliation spots: probe field serialization, PostgreSQL
+optional defaults (backup retention, storage tier, public network access), and
+the Log Analytics workspace defaults. The storage account `min_tls_version`
+stays `TLS1_0` on purpose to match the current resource.
+
+### What you should observe
+
+- `terraform init` downloads azurerm 4.80.0 and configures the azurerm backend
+  against `stinvoicereviewtfstate`.
+- After the imports, `terraform plan` prints "No changes. Your infrastructure
+  matches the configuration." and exits 0; a second run is identical.
+- The app remains reachable at its existing HTTPS URL with the password gate
+  working, and a fictional document still processes.
+- Running the GitHub Actions image deployment and then `terraform plan` still
+  reports no changes because the image attribute is ignored.
+
+### Checkpoint
+
+- [ ] `bootstrap-remote-state.ps1` completes and creates the state RG, storage
+  account, and container.
+- [ ] `terraform init` succeeds with azurerm `= 4.80.0` and commits
+  `terraform.lock.hcl`.
+- [ ] All 11 imports succeed.
+- [ ] `terraform plan -detailed-exitcode` returns 0 with an empty diff.
+- [ ] No `*.tfstate`, `.env`, or secret values are committed.
+- [ ] The app `/health` endpoint and the full review flow still work unchanged.

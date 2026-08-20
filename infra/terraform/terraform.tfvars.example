@@ -1,0 +1,15 @@
+# Copy this file to terraform.tfvars and adjust values if your environment
+# differs. This file intentionally contains no secrets; the six Container App
+# secret values stay out of Terraform (managed by scripts/deploy-azure.ps1).
+
+subscription_id = "547ea842-2fe2-41f8-95a4-80bd9f69961b"
+location        = "southeastasia"
+
+container_image = "invoicereview547ea842.azurecr.io/invoice-review-web:8c7915f71398378219d536eb4d82284000c84a85"
+
+azure_openai_endpoint              = "https://invoice-review-foundry-hungbd.openai.azure.com/openai/v1"
+azure_openai_deployment            = "gpt-4.1-mini"
+azure_document_intelligence_endpoint = "https://di-invoice-review-77ee6.cognitiveservices.azure.com/"
+
+upload_dir        = "/mnt/data/uploads"
+frontend_dist_dir = "/app/frontend-dist"
