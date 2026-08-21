@@ -602,3 +602,35 @@ original values existed in the Phase 1 export files.
 - [ ] The Container App uses Key Vault references and the plan shows no changes.
 - [ ] The app is functional after the revision switch.
 - [ ] No secret value appears in the repository, state, or this guide.
+## Terraform setup explainer
+
+### Outcome
+
+A beginner-friendly reference (`docs/terraform-setup.md`) explains the Terraform
+configuration from zero: what Terraform is, the file layout, the managed
+resources, secrets, remote state, commands, and the migration story. No prior
+Terraform knowledge is required to follow it.
+
+### Why
+
+Phase 1 and Phase 2 are done. Future-you or a new collaborator should be able
+to understand and operate the setup without reverse-engineering the files.
+
+### Commands
+
+```powershell
+# Nothing to run; just read the guide
+Get-Content docs/terraform-setup.md
+```
+
+### What you should observe
+
+The guide covers: the config-vs-state-vs-Azure mental model, every file in
+`infra/terraform/`, the managed-resource table, the Key Vault secret flow
+(including the seed script and RBAC grants), remote state, a safe command
+checklist, and the Phase 1/Phase 2 story.
+
+### Checkpoint
+
+- [ ] `docs/terraform-setup.md` exists and matches the current configuration.
+- [ ] The guide contains no secret values.
